@@ -1,0 +1,163 @@
+---
+title: "Differential Expression Analysis"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: false
+    theme: readable
+    highlight: zenburn
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(DESeq2)
+library(EnhancedVolcano)
+library(tidyverse)
+library(cowplot)
+library(pheatmap)
+library(viridis)
+```
+
+## 1. Import files
+
+We load the normalized `dds` object created during preprocessing and batch correction.
+```{r load_data}
+load(file = "../results/dds_norm.RData")
+dds_norm
+```
+
+We load the metadata containing project and experimental condition information.
+```{r load_metadata}
+metadatos <- read.csv(file = "../data/metadata_all.csv", row.names = 1)
+head(metadatos)
+```
+
+---
+
+## 2. Differential Expression Analysis
+
+We check the conditions available in our metadata to set up the comparison.
+```{r check_conditions}
+metadatos %>%
+  group_by(Condition) %>%
+  summarise(Count = n())
+```
+
+We create the DESeq2 results object, explicitly defining the comparison: Control vs Treatment.
+*Note: in DESeq2 the standard contrast format is `c("factor", "numerator", "denominator")`.*
+```{r deseq_results}
+res <- results(dds_norm, contrast = c("Condition", "Control", "Treatment"))
+res
+
+write.csv(res, file = "../results/deseq_results_Control_vs_Treatment.csv")
+```
+
+### 2.1. Volcano Plot
+We create a volcano plot for a general view of the differential expression. We set the significance threshold (`padj < 0.01`) and the fold change threshold (`|log2FC| > 1`).
+
+```{r volcano_plot, fig.width=11, fig.height=8.5, warning=FALSE}
+volc <- EnhancedVolcano(res,
+               lab = rownames(res),
+               x = 'log2FoldChange',
+               y = 'padj',
+               axisLabSize = 12,
+               pCutoff = 0.01,
+               FCcutoff = 1, # Matches the filtering step below
+               col = c('grey', 'orange', 'purple', 'forestgreen'),
+               colAlpha = 0.7,
+               pointSize = 3,
+               title = 'Volcano Plot',
+               titleLabSize = 12,
+               subtitle = 'Control vs Treatment',
+               subtitleLabSize = 10,
+               captionLabSize = 10,
+               labSize = 3,
+               legendLabels = c('NS', '|log2FC|>1', 'adj-p<0.01', 'DEG'),
+               legendPosition = 'right',
+               legendLabSize = 12,
+               border = 'full')
+volc
+
+ggsave(filename = "../results/volcano_Control_vs_Treatment.pdf",
+       plot = volc, width = 11, height = 8.5)
+```
+
+### 2.2. Extract Differentially Expressed Genes (DEGs)
+We filter the results to keep only genes that pass the significance and fold change thresholds.
+
+```{r filter_degs}
+deg <- subset(res, padj < 0.01 & abs(log2FoldChange) > 1)
+paste("Total DEGs found:", nrow(deg))
+
+up <- subset(deg, log2FoldChange > 1)
+paste("Up-regulated genes:", nrow(up))
+
+down <- subset(deg, log2FoldChange < (-1))
+paste("Down-regulated genes:", nrow(down))
+
+write.csv(deg, file = "../results/deg_Control_vs_Treatment.csv", row.names = TRUE)
+```
+
+A sample output of this step is provided in `data_example/deg_Control_vs_Treatment.csv` so the next steps can be tested without re-running the full pipeline.
+
+### 2.3. Expression Heatmap
+We generate a heatmap to visualize expression patterns of the identified DEGs across samples.
+
+```{r prepare_heatmap_data}
+normcounts <- counts(dds_norm, normalized = TRUE)
+colnames(normcounts) <- metadatos$Replicates
+
+muestras_contraste <- metadatos %>%
+  filter(Condition %in% c("Control", "Treatment")) %>%
+  pull(Replicates)
+
+subnormcounts <- normcounts[, muestras_contraste]
+deg_id <- rownames(deg)
+```
+
+```{r plot_heatmap, fig.width=11, fig.height=8.5}
+hm <- pheatmap(subnormcounts[deg_id, ],
+         scale = "row",
+         show_rownames = FALSE,
+         treeheight_row = 0,
+         color = viridis(100),
+         main = "Heatmap of DEGs: Control vs Treatment")
+hm
+
+ggsave(filename = "../results/heatmap_Control_vs_Treatment.pdf",
+       plot = hm, width = 11, height = 8.5)
+```
+
+---
+
+## 3. Consolidate DEG lists
+
+We save the DEG IDs in a clean table format for downstream functional analysis.
+
+*(This section is ready to scale up if you add comparisons from other experiments later.)*
+
+```{r consolidate_degs}
+BP1_deg <- read.csv(file = "../results/deg_Control_vs_Treatment.csv", row.names = 1)
+
+deg_summary <- data.frame(
+  GeneID = rownames(BP1_deg),
+  Contrast = "Control_vs_Treatment"
+)
+
+head(deg_summary)
+
+write_csv(deg_summary, file = "../results/common_unique_degs.csv")
+```
+
+---
+
+## Session information
+```{r session_info}
+sessionInfo()
+```

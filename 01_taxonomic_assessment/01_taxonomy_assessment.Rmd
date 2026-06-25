@@ -1,0 +1,151 @@
+---
+title: "Taxonomic Assessment of Sequencing Reads"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: readable
+    highlight: zenburn
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This step evaluates the Kraken2 taxonomic classification report **before** moving on to quantification. The goal is to confirm that sequencing reads truly belong to the expected organism and to flag possible contamination early, when it is still cheap to fix.
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(plotly)
+library(networkD3)
+library(htmlwidgets)
+library(webshot)
+library(magick)
+```
+
+## 1. Import and clean the Kraken2 report
+
+Kraken2 reports use leading whitespace to represent the taxonomic hierarchy visually. We strip that whitespace so taxon names can be matched exactly.
+
+```{r data_import}
+out_dir <- "../results/taxonomy"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Replace with the path to your sample's Kraken2 report
+kraken_data <- read.delim("../data/kraken/reporte_taxonomia.txt",
+                          header = FALSE,
+                          sep = "\t",
+                          col.names = c("Percentage", "Clade_Reads", "Taxon_Reads",
+                                        "Rank", "TaxID", "Name"))
+
+kraken_data <- kraken_data %>%
+  mutate(Name = str_trim(Name))
+
+head(kraken_data)
+```
+
+## 2. Global species abundance
+
+We look at the Species-level rank (`S`) to identify the top organisms detected in the sample. For a clean sample, the target organism should dominate this list by a wide margin.
+
+```{r relative_abundance_bar}
+bar_data <- kraken_data %>%
+  filter(Rank == "S") %>%
+  arrange(desc(Percentage)) %>%
+  head(10)
+
+p_bar <- ggplot(bar_data, aes(x = reorder(Name, Percentage), y = Percentage, fill = Name)) +
+  geom_bar(stat = "identity", color = "black", show.legend = FALSE) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Relative Species Abundance",
+       subtitle = "Taxonomic classification based on k-mers (Kraken2)",
+       x = "Identified Species",
+       y = "Percentage of Reads (%)") +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, color = "#2c3e50"),
+    plot.subtitle = element_text(size = 12, color = "#7f8c8d"),
+    axis.text.y = element_text(face = "italic", size = 12, color = "black")
+  ) +
+  scale_fill_viridis_d(option = "mako", direction = -1)
+
+p_bar
+
+ggsave(filename = paste0(out_dir, "/barplot_taxonomy.pdf"), plot = p_bar, width = 10, height = 8)
+ggsave(filename = paste0(out_dir, "/barplot_taxonomy.tiff"), plot = p_bar, width = 10, height = 8, dpi = 600, compression = "lzw")
+```
+
+**What to check here:** if your target organism is not the top hit, or if a contaminant species appears with a large percentage, stop and investigate before moving on to quantification (`00_preprocessing_linux/05_quantification.sh`).
+
+## 3. Lowest Common Ancestor (LCA) read distribution
+
+Not every read that maps to a genus can be confidently resolved to a single species — Kraken2's LCA algorithm conservatively assigns these reads to the genus level instead of guessing. This Sankey diagram shows what fraction of genus-level reads were resolved to specific species versus "stuck" at the genus rank.
+
+```{r lca_sankey}
+# Replace "Target_Genus" with your organism's genus name as it appears
+# in the Kraken2 report (e.g., "Pectobacterium", "Escherichia", "Bacillus")
+target_genus <- "Target_Genus"
+
+genus_reads <- kraken_data %>%
+  filter(Rank == "G" & Name == target_genus) %>%
+  pull(Clade_Reads)
+
+species_data <- kraken_data %>%
+  filter(Rank == "S" & grepl(target_genus, Name)) %>%
+  select(Name, Clade_Reads)
+
+sum_species <- sum(species_data$Clade_Reads)
+unclassified_reads <- genus_reads - sum_species
+
+links <- data.frame(
+  source = rep(paste0(target_genus, " (Total Genus)"), nrow(species_data) + 1),
+  target = c(species_data$Name, "Conserved at Genus Level (LCA)"),
+  value = c(species_data$Clade_Reads, unclassified_reads)
+)
+
+nodes <- data.frame(name = unique(c(links$source, links$target)))
+
+links$IDsource <- match(links$source, nodes$name) - 1
+links$IDtarget <- match(links$target, nodes$name) - 1
+
+sankey_plot <- sankeyNetwork(Links = links, Nodes = nodes,
+                             Source = "IDsource", Target = "IDtarget",
+                             Value = "value", NodeID = "name",
+                             units = " Reads",
+                             fontSize = 14, nodeWidth = 30,
+                             sinksRight = FALSE,
+                             margin = list(left = 50, right = 50))
+
+sankey_plot
+
+# Export to static formats for publication
+saveWidget(sankey_plot, "temp_sankey.html", selfcontained = FALSE)
+webshot("temp_sankey.html", file = paste0(out_dir, "/sankey_lca.pdf"))
+
+img_sankey <- image_read_pdf(paste0(out_dir, "/sankey_lca.pdf"), density = 600)
+image_write(img_sankey, paste0(out_dir, "/sankey_lca.tiff"), format = "tiff")
+
+unlink(c("temp_sankey.html", "temp_sankey_files"), recursive = TRUE)
+```
+
+## 4. Decision checkpoint
+
+Before continuing to `02_exploratory_analysis/`, confirm:
+
+- [ ] The target organism's genus/species is the dominant hit (ideally > 90% of classified reads)
+- [ ] No unexpected contaminant species appear above a few percent
+- [ ] The proportion of unclassified reads (genus-level only) is reasonable for your reference database
+- [ ] If multiple samples were run, results are consistent across replicates
+
+If any of these fail, consider re-checking library prep, the Kraken2 database version, or excluding the affected sample before proceeding.
+
+---
+
+## Session information
+```{r session_info}
+sessionInfo()
+```

@@ -1,0 +1,222 @@
+---
+title: "Normalization and Batch Correction"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: readable
+    highlight: zenburn
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(cowplot)
+library(DESeq2)
+library(sva)
+```
+
+## 1. Import files
+
+We load the workspace created in the previous exploratory analysis step.
+```{r load_rdata}
+load(file = "../results/dds.RData")
+```
+
+We extract the batch information from the metadata. This is important to find and fix technical effects that are unrelated to the biology of the experiment (e.g., different sequencing runs, extraction batches).
+```{r extract_batch}
+head(metadatos)
+batch <- metadatos$batch
+batch
+```
+
+We check that the filtered counts object is still a matrix, which is required by the correction functions.
+```{r check_matrix_class}
+class(filtcounts)
+```
+
+---
+
+## 2. Batch Effect Correction
+
+We use `ComBat_seq` to adjust the filtered raw counts. Unlike other batch correction tools, `ComBat_seq` keeps the counts as whole numbers, which DESeq2 requires.
+
+```{r combat_seq_correction}
+adjcounts <- ComBat_seq(filtcounts,      # Filtered counts matrix
+                        batch = batch,   # Batch variable
+                        group = NULL)    # No biological variables for now
+head(adjcounts)
+```
+
+We save the adjusted counts matrix.
+```{r export_adjcounts}
+write.csv(adjcounts, file = "../results/adjcounts.csv", row.names = TRUE)
+```
+
+We update the `DESeqDataSet` object using the new batch-corrected matrix.
+```{r create_dds_adj}
+dds_adj <- DESeqDataSetFromMatrix(countData = adjcounts,
+                                  colData = metadatos,
+                                  design = ~ Condition)
+dds_adj
+```
+
+---
+
+## 3. Exploratory analysis of adjusted counts
+
+We apply a new Variance Stabilizing Transformation (VST) on the corrected data to evaluate how well `ComBat_seq` worked, using a PCA plot.
+
+```{r pca_adj_calculation}
+vsd2 <- vst(dds_adj, blind = FALSE)
+pcaData2 <- plotPCA(vsd2, intgroup = "Condition", returnData = TRUE)
+
+percentVar2 <- round(100 * attr(pcaData2, "percentVar"))
+paste("Explained variance (PC1 + PC2) = ", sum(percentVar2), "%")
+```
+
+We create the PCA plot for the adjusted data.
+```{r pca_adj_plot, fig.width=11, fig.height=8.5}
+pca2 <- ggplot(pcaData2, aes(x = PC1,
+                             y = PC2,
+                             color = Condition,
+                             shape = Condition)) +
+  geom_point(size = 7, alpha = 0.8) +
+  scale_shape_manual(values = 15:19) +
+  labs(title = "PCA: Treatment vs Control",
+       subtitle = "Batch corrected data",
+       x = paste0("PC1: ", percentVar2[1], "% variance"),
+       y = paste0("PC2: ", percentVar2[2], "% variance"),
+       color = "Condition",
+       shape = "Condition") +
+  theme_minimal() +
+  coord_fixed()
+
+pca2
+ggsave(filename = "../results/pca_adj.pdf", plot = pca2, width = 11, height = 8.5)
+```
+
+We visually compare the original (raw) PCA with the corrected (adjusted) PCA.
+```{r compare_pcas, fig.width=20, fig.height=4}
+pcas <- plot_grid(pca, pca2,
+                  ncol = 2, nrow = 1,
+                  labels = "AUTO")
+pcas
+
+ggsave(filename = "../results/pca_raw_adj.pdf", plot = pcas, width = 20, height = 4)
+```
+
+We save the progress of the adjusted data.
+```{r save_adj_rdata}
+save(dds_adj, adjcounts, pca2, pcas, file = "../results/dds_adj.RData")
+```
+
+---
+
+## 4. Normalization for Differential Expression
+
+DESeq2 uses the "median of ratios" method to calculate size factors. This corrects for differences in sequencing depth between samples.
+
+```{r deseq_normalization}
+dds_norm <- DESeq(dds_adj)
+dds_norm
+```
+
+Review of the size factors for each sample:
+* Values `> 1` mean the sample was over-represented (sequenced more deeply).
+* Values `< 1` mean the sample was under-represented.
+```{r check_size_factors}
+dds_norm$sizeFactor
+```
+
+We extract and save the final normalized counts matrix.
+```{r extract_normcounts}
+normcounts <- counts(dds_norm, normalized = TRUE)
+head(normcounts)
+write.csv(normcounts, file = "../results/normcounts.csv", row.names = TRUE)
+```
+
+### 4.1. Evaluate data spread
+
+To visualize the effect of each processing step, we compare counts at three stages: raw, batch-corrected, and normalized. We apply a log transformation (`log(x+1)`) purely to make the boxplots easier to read.
+
+```{r log_transform}
+log_raw <- log(filtcounts + 1)
+log_adj <- log(adjcounts + 1)
+log_norm <- log(normcounts + 1)
+```
+
+Helper function to reshape matrices from wide to long format for `ggplot2`.
+```{r wide2long_function}
+wide2long <- function(countsmatrix) {
+    as.data.frame(countsmatrix) %>%
+    rownames_to_column("Gene") %>%
+    pivot_longer(cols = -Gene,
+                 names_to = "Sample",
+                 values_to = "Count")
+}
+```
+
+We apply this function to our three matrices:
+```{r reshape_matrices}
+log_raw_long <- wide2long(log_raw)
+log_adj_long <- wide2long(log_adj)
+log_norm_long <- wide2long(log_norm)
+```
+
+Create comparative boxplots:
+```{r generate_boxplots}
+box1 <- ggplot(log_raw_long, aes(x = Sample, y = Count, fill = Sample)) +
+    geom_boxplot() +
+    labs(title = "Raw filtered counts",
+         x = "Samples",
+         y = "log(counts)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.position = "none")
+
+box2 <- ggplot(log_adj_long, aes(x = Sample, y = Count, fill = Sample)) +
+    geom_boxplot() +
+    labs(title = "Batch corrected counts",
+         x = "Samples",
+         y = "log(counts)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.position = "none")
+
+box3 <- ggplot(log_norm_long, aes(x = Sample, y = Count, fill = Sample)) +
+    geom_boxplot() +
+    labs(title = "Normalized counts (DESeq2)",
+         x = "Samples",
+         y = "log(counts)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.position = "none")
+```
+
+We group and save the final plots.
+```{r combine_boxplots, fig.width=11, fig.height=8.5}
+boxplots <- plot_grid(box1, box2, box3,
+                      ncol = 3, nrow = 1,
+                      labels = "AUTO")
+boxplots
+
+ggsave(filename = "../results/boxplots.pdf", plot = boxplots, width = 15, height = 6)
+```
+
+We save the final normalized objects for the differential expression analysis.
+```{r save_final_rdata}
+save(dds_norm, normcounts, file = "../results/dds_norm.RData")
+```
+
+---
+
+## Session information
+```{r session_info}
+sessionInfo()
+```

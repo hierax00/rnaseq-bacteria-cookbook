@@ -1,0 +1,65 @@
+---
+title: "Package Installation"
+output: html_document
+---
+
+This script installs all R packages required across the cookbook. Run it once before using any of the numbered pipeline steps.
+
+```{r install_cran, eval = FALSE}
+# --- CRAN packages ---
+install.packages("rmarkdown")
+install.packages("knitr")
+install.packages("tidyverse")
+install.packages("viridis")
+install.packages("pheatmap")
+install.packages("cowplot")
+install.packages("ggVennDiagram")
+install.packages("ggrepel")
+install.packages("UpSetR")
+install.packages("plotly")
+install.packages("networkD3")
+install.packages("htmlwidgets")
+install.packages("webshot")
+install.packages("magick")
+install.packages("igraph")
+install.packages("ggraph")
+install.packages("tidygraph")
+install.packages("tinytex")
+tinytex::install_tinytex()
+```
+
+```{r install_bioc, eval = FALSE}
+# --- Bioconductor packages ---
+install.packages("BiocManager")
+BiocManager::install("tximport")
+BiocManager::install("DESeq2")
+BiocManager::install("EnhancedVolcano")
+BiocManager::install("sva")
+BiocManager::install("clusterProfiler")
+BiocManager::install("enrichplot")
+BiocManager::install("pathview")
+BiocManager::install("GO.db")
+BiocManager::install("STRINGdb")
+BiocManager::install("KEGGREST")
+```
+
+```{r load_all, message = FALSE, warning = FALSE}
+library(rmarkdown)
+library(knitr)
+library(tidyverse)
+library(viridis)
+library(pheatmap)
+library(cowplot)
+library(ggVennDiagram)
+library(tinytex)
+library(tximport)
+library(DESeq2)
+library(EnhancedVolcano)
+library(sva)
+library(clusterProfiler)
+library(enrichplot)
+library(pathview)
+library(GO.db)
+library(STRINGdb)
+library(KEGGREST)
+```

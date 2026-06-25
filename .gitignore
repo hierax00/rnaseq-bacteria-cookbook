@@ -1,0 +1,31 @@
+# R artifacts — never upload these
+.RData
+.RDataTmp
+.RDataTmp1
+.Rhistory
+.Rproj.user/
+
+# Large data files — reference only, don't upload raw reads
+*.fastq
+*.fastq.gz
+*.fna
+*.fasta
+*.bam
+*.sam
+
+# Kallisto output folders (too large)
+resultados_*/
+
+# Kraken database (too large)
+kraken_db/
+
+# Large taxonomy/annotation inputs (organism-specific — provide your own)
+data/kraken/reporte_taxonomia.txt
+data/annotation.tsv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rendered outputs (optional — remove these lines if you want PDFs tracked)
+# *.pdf

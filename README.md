@@ -73,7 +73,7 @@ This pipeline uses [eggNOG-mapper](http://eggnog-mapper.embl.de/) output (`annot
 
 If you use this pipeline in your research, please cite:
 
-> López-Chablé, E.U. (2026). *RNA-seq Analysis Cookbook for Bacteria*. GitHub. [DOI pending — Zenodo registration in progress]
+> López-Chablé, E.U. (2026). *RNA-seq Analysis Cookbook for Bacteria* (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.20849957
 
 ## AI disclosure
 

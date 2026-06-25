@@ -1,3 +1,4 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20849957.svg)](https://doi.org/10.5281/zenodo.20849957)
 # RNA-seq Analysis Cookbook for Bacteria 🧬
 
 A reproducible, step-by-step pipeline for RNA-seq transcriptomic analysis in bacteria, with specific considerations for *Pectobacterium* and other gram-negative phytopathogens. Designed as a practical guide for research groups working with bacterial transcriptomics.
